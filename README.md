@@ -2,4 +2,4 @@
 Object detection using Transfer Learning(Resnetmodel)
 
 
-Download resnet/yolo model 
+Download resnet/RetinaNet model 
