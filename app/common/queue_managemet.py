@@ -1,46 +1,92 @@
 import sys
 import zmq
 import json
+import os
 import logging
+import traceback
+from multiprocessing import Process
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class ZMQManager:
+class ProxyManager:
     def __init__(self):
-        self.context = zmq.Context()
-        self.BIND_IP = 'localhost'
-        self.port = 5556
+        self.SENDER_PORT = 3344
+        self.RECEIVER_PORT = 3345
+        self.SENDER_PROXY = f"tcp://*:{self.SENDER_PORT}"
+        self.RECEIVER_PROXY = f"tcp://*:{self.RECEIVER_PORT}"
+        self.__number_of_processes__ = 1
 
-class Publisher(ZMQManager):
+    def main(self):
+        try:
+            context = zmq.Context(1)
+            
+            # Socket facing clients
+            sender = context.socket(zmq.XREP)
+            sender.bind(self.SENDER_PROXY)
+            # Socket facing services
+
+            receiver = context.socket(zmq.XREQ)
+            receiver.bind(self.RECEIVER_PROXY)
+            print(f'Starting Proxy | Sender:{self.SENDER_PROXY} | Receiver{self.SENDER_PROXY}')
+            zmq.device(zmq.QUEUE, sender, receiver)
+
+        except Exception as e:
+            print(e)
+            print("bringing down zmq device")
+            traceback.print_exc()
+        finally:
+            sender.close()
+            receiver.close()
+            context.term()
+
+    def start_proxy_server(self):
+        self.main()
+        #p = Process(target=self.main)
+        #p.start()
+        #p.join()
+               
+class Sender(ProxyManager):
     def __init__(self):
-        
-        super().__init__()        
-        self.socket = context.socket(zmq.PUB)
-        self.socket.bind(f"tcp://{self.BIND_IP}:{self.port}")
+        self.client_id = 1
+        self.context = zmq.Context() 
+
+        super().__init__()
+        self.socket = self.context.socket(zmq.REQ)
+        self.socket.connect("tcp://localhost:%s" % self.SENDER_PORT)
 
     def send_message(self, message):
         if isinstance(message, dict):
-            message = json.dumps(message)
-            logger.info('Message Sent', message)
-            socket.send("%d %d" % (topic, messagedata))
+            mm  = {f'self.client_id':message}
+            self.socket.send_json(mm)
+            message = self.socket.recv()
             return True
         raise TypeError('Message should be of type Dict')
 
+
+class Receiver(ProxyManager):
+    
+    def __init__(self):       
+        self.server_id = 2
+        super().__init__()
+        self.context = zmq.Context() 
+        self.socket = self.context.socket(zmq.REP)
+        self.socket.connect("tcp://localhost:%s" % self.SENDER_PORT)
+
+    def receive_message(self):
+        message = self.socket.recv()
+        message = json.dumps(message)
+        print("Received Message", message)
+        self.socket.send({self.server_id:True})
+        return message
+
 if __name__ == "__main__":
-    import zmq
-    import random
-    import sys
-    import time
+    if sys.argv[1] == 'proxy':
+        ProxyManager().start_proxy_server()
+    if sys.argv[1] == 'sender':
+        sender = Sender()
 
-    port = "5556"
-    context = zmq.Context()
-    socket = context.socket(zmq.REP)
-    socket.bind("tcp://*:%s" % port)
-
-    while True:
-        topic = random.randrange(9999,10005)
-        messagedata = random.randrange(1,215) - 80
-        print("%d %d" % (topic, messagedata))
-        socket.send_json({topic:messagedata})
-        time.sleep(1)
-
+        sender.send_message({'test':'TEST'})
+    
+    if sys.argv[1] == 'receiver':
+        receiver = Receiver()
+        receiver.receive_message()
